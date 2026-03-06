@@ -1,269 +1,285 @@
 const puppeteer = require("puppeteer");
 
 (async () => {
-  const browser = await puppeteer.launch({
-    headless: false,
-    defaultViewport: null
-  });
 
-  const page = await browser.newPage();
+  // ─── Селекторы для перебора (только "безопасные" кнопки продвижения) ──────
+  const ALL_SELECTORS = [
+    ".FBYjn.gK0xL.W5dIq",
+    ".fE2D5",
+    ".YatIx.fGS78.eKaL7.Bnaur",
+    "div.THeKv button.c47Sk",
+    ".hsqnc",
+    ".TYX6O.eKaL7.Bnaur",
+    ".Y7u8A",
+    ".JwhOC",
+    "div.s53_U",
+    "button.AJ_5h",
+  ];
 
-  await page.goto("https://web.snapchat.com", {
-    waitUntil: "networkidle2"
-  });
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
-  console.log("Ждём логин...");
+  async function waitFor(page, selector, timeout = 6000) {
+    try {
+      await page.waitForSelector(selector, { timeout });
+      return await page.$(selector);
+    } catch {
+      return null;
+    }
+  }
 
-  // Ждём появления любого элемента после авторизации
-  await page.waitForSelector("body", { timeout: 0 });
+  async function waitGone(page, selector, timeout = 6000) {
+    try {
+      await page.waitForFunction(
+        (sel) => !document.querySelector(sel),
+        { timeout },
+        selector
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
-  // Ждём появления одной из нужных кнопок после авторизации
-  await page.waitForFunction(() => {
-    return document.querySelector('.FBYjn.gK0xL.W5dIq') || document.querySelector('.OK7va');
-  }, { timeout: 0 });
+  async function clickAll(page, selector, label) {
+    const els = await page.$$(selector);
+    if (!els.length) { console.log(`[${label}] блоков не найдено`); return false; }
+    for (let i = 0; i < els.length; i++) {
+      try { await els[i].click(); } catch {}
+      console.log(`✅ [${label}] блок ${i+1}/${els.length} нажат`);
+      await wait(400);
+    }
+    return true;
+  }
 
-  console.log("Страница активна. Запускаем проверку...");
-
-  while (true) {
-    const unlockButton = await page.$(".FBYjn.gK0xL.W5dIq");
-
-    if (unlockButton) {
-      await unlockButton.click();
-      console.log("Нажали кнопку разблокировки");
-
-      // Ждём появления кнопки снимка
-      try {
-        await page.waitForSelector(".fE2D5", { timeout: 5000 });
-        await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-        const snapButton = await page.$(".fE2D5");
-        if (snapButton) {
-          let snapClickAttempts = 0;
-          let snapGone = false;
-          while (snapClickAttempts < 3 && !snapGone) {
-            await snapButton.click();
-            await new Promise(r => setTimeout(r, 500));
-            const stillExists = await page.$(".fE2D5");
-            if (!stillExists) {
-              console.log("Кнопка снимка успешно нажата и исчезла");
-              snapGone = true;
-            } else {
-              console.log("Кнопка снимка нажата, но она осталась на экране, попытка " + (snapClickAttempts + 1));
+  // ─── Перебор всех кнопок — возвращает true если ХОТЬ ЧТО-ТО нажалось ─────
+  async function tryAllButtons(page) {
+    console.log("\n⚡ Перебор всех известных кнопок...");
+    let any = false;
+    for (const sel of ALL_SELECTORS) {
+      let clicked = false;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          // Для селекторов с несколькими элементами — кликаем все
+          const els = await page.$$(sel);
+          if (els.length > 0) {
+            for (const el of els) {
+              try { await el.click(); } catch {}
             }
-            snapClickAttempts++;
-          }
-          if (!snapGone) {
-            console.log("Кнопка снимка не исчезла после 3 попыток, переход к следующей итерации");
-            continue;
-          }
-
-          // 1. Кнопка отправки нажата
-          const sendButton = await page.$(".YatIx.fGS78.eKaL7.Bnaur");
-          await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-          if (sendButton) {
-            await sendButton.click();
-            console.log("Кнопка отправки нажата");
-
-            // 2. Ждём появления кнопки с огоньком
-            try {
-              await page.waitForSelector('div.THeKv', { timeout: 5000 });
-              await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-              const theKvDiv = await page.$('div.THeKv');
-              if (theKvDiv) {
-                const fireButtons = await theKvDiv.$$('button.c47Sk');
-                let fireClicked = false;
-                for (let i = 0 ; i < fireButtons.length; i++) {
-                  const content = await page.evaluate(el => el.textContent, fireButtons[i]);
-                  if (content.includes('🔥')) {
-                    await fireButtons[i].click();
-                    console.log('Кнопка с огоньком 🔥 нажата (div.THeKv > button.c47Sk)');
-                    fireClicked = true;
-                    break;
-                  }
-                }
-                await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                if (!fireClicked) {
-                  console.log('Кнопка с огоньком 🔥 не найдена среди div.THeKv > button.c47Sk');
-                }
-              } else {
-                console.log('div.THeKv не найден');
-              }
-            } catch {
-              console.log("Кнопка с огоньком 🔥 не появилась в течение 5 секунд");
-            }
-
-            // 3. Ждём появления всех блоков hSQnC
-            try {
-              await page.waitForSelector(".hsqnc", { timeout: 5000 });
-              await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-              const blocks = await page.$$(".hsqnc");
-              if (blocks.length > 0) {
-                for (let i = 0; i < blocks.length; i++) {
-                  await blocks[i].click();
-                  console.log(`Блок hSQnC ${i+1} нажат`);
-                  await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                }
-                // 4. Ждём появления кнопки посылки
-                try {
-                  await page.waitForSelector(".TYX6O.eKaL7.Bnaur", { timeout: 5000 });
-                  await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                  const finalSend = await page.$(".TYX6O.eKaL7.Bnaur");
-                  if (finalSend) {
-                    await finalSend.click();
-                    console.log("Финальная кнопка посылки нажата");
-                    // Возврат к первой кнопке отправки
-                    continue;
-                  } else {
-                    console.log("Финальная кнопка посылки не найдена");
-                  }
-                } catch {
-                  console.log("Финальная кнопка посылки не появилась в течение 5 секунд");
-                }
-              } else {
-                console.log("Блоки hSQnC не найдены");
-              }
-            } catch {
-              console.log("Блоки hSQnC не появились в течение 5 секунд");
-            }
-
-            // 3.1 Ждём и нажимаем кнопку Y7u8A перед JwhOC
-            let y7u8aAttempts = 0;
-            let y7u8aClicked = false;
-            while (y7u8aAttempts < 3 && !y7u8aClicked) {
-              try {
-                await page.waitForSelector(".Y7u8A", { timeout: 3000 });
-                await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                const y7u8aButton = await page.$(".Y7u8A");
-                if (y7u8aButton) {
-                  await y7u8aButton.click();
-                  console.log("Кнопка Y7u8A нажата");
-                  y7u8aClicked = true;
-                } else {
-                  console.log("Кнопка Y7u8A не найдена, попытка " + (y7u8aAttempts + 1));
-                }
-              } catch {
-                console.log("Кнопка Y7u8A не появилась, попытка " + (y7u8aAttempts + 1));
-                // Новый шаг: если кнопка Y7u8A не появилась, нажать .xHw7V.T0LP0.STlkX и сразу продолжить с шага снимка
-                try {
-                  await page.waitForSelector(".xHw7V.T0LP0.STlkX", { timeout: 1000 });
-                  const closeButton = await page.$(".xHw7V.T0LP0.STlkX");
-                  if (closeButton) {
-                    await closeButton.click();
-                    console.log("Кнопка .xHw7V.T0LP0.STlkX (Close snap preview) нажата после неудачи с Y7u8A, возврат к шагу снимка");
-                  } else {
-                    console.log("Кнопка .xHw7V.T0LP0.STlkX не найдена после неудачи с Y7u8A");
-                  }
-                } catch {
-                  console.log("Кнопка .xHw7V.T0LP0.STlkX не появилась после неудачи с Y7u8A");
-                }
-                // Сразу переход к шагу снимка
-                break;
-              }
-              y7u8aAttempts++;
-              await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-            }
-
-            // 3. Ждём появления всех блоков JwhOC
-            try {
-              await page.waitForSelector(".JwhOC", { timeout: 5000 });
-              await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-              const jwhocBlocks = await page.$$(".JwhOC");
-              if (jwhocBlocks.length > 0) {
-                for (let i = 0; i < jwhocBlocks.length; i++) {
-                  await jwhocBlocks[i].click();
-                  console.log(`Блок JwhOC ${i+1} нажат`);
-                  await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                }
-                // 4. Ждём появления div.s53_U
-                let s53uAttempts = 0;
-                let s53uClicked = false;
-                while (s53uAttempts < 3 && !s53uClicked) {
-                  try {
-                    await page.waitForSelector("div.s53_U", { timeout: 3000 });
-                    await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                    const s53uDiv = await page.$("div.s53_U");
-                    if (s53uDiv) {
-                      await s53uDiv.click();
-                      console.log("div.s53_U нажат");
-                      s53uClicked = true;
-                    } else {
-                      console.log("div.s53_U не найден, попытка " + (s53uAttempts + 1));
-                    }
-                  } catch {
-                    console.log("div.s53_U не появился, попытка " + (s53uAttempts + 1));
-                  }
-                  s53uAttempts++;
-                  await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                }
-                // Новый шаг: кнопка AJ_5h (Turn off camera)
-                let aj5hAttempts = 0;
-                let aj5hClicked = false;
-                while (aj5hAttempts < 3 && !aj5hClicked) {
-                  try {
-                    await page.waitForSelector("button.AJ_5h", { timeout: 3000 });
-                    await new Promise(r => setTimeout(r, 500));
-                    const aj5hButton = await page.$("button.AJ_5h");
-                    if (aj5hButton) {
-                      await aj5hButton.click();
-                      console.log("Кнопка AJ_5h (Turn off camera) нажата");
-                      aj5hClicked = true;
-                    } else {
-                      console.log("Кнопка AJ_5h не найдена, попытка " + (aj5hAttempts + 1));
-                    }
-                  } catch {
-                    console.log("Кнопка AJ_5h не появилась, попытка " + (aj5hAttempts + 1));
-                  }
-                  aj5hAttempts++;
-                  await new Promise(r => setTimeout(r, 500));
-                }
-                if (!aj5hClicked) {
-                  continue;
-                }
-                // 5. Возврат к шагу снимка
-                let snapAttempts = 0;
-                let snapFound = false;
-                while (snapAttempts < 3 && !snapFound) {
-                  try {
-                    await page.waitForSelector(".fE2D5", { timeout: 3000 });
-                    await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                    const snapButton = await page.$(".fE2D5");
-                    if (snapButton) {
-                      console.log("Готов к шагу снимка");
-                      snapFound = true;
-                      break; // выйти из while, чтобы цикл продолжился с шага снимка
-                    } else {
-                      console.log("Кнопка снимка не найдена, попытка " + (snapAttempts + 1));
-                    }
-                  } catch {
-                    console.log("Кнопка снимка не появилась, попытка " + (snapAttempts + 1));
-                  }
-                  snapAttempts++;
-                  await new Promise(r => setTimeout(r, 500)); // уменьшена пауза до 0.5 сек
-                }
-                if (!snapFound) {
-                  console.log("Кнопка снимка не найдена за 3 попытки, возвращаемся к разблокировке");
-                }
-                // если snapFound, цикл продолжит с шага снимка
-                continue;
-              } else {
-                console.log("Блоки JwhOC не найдены");
-              }
-            } catch {
-              console.log("Блоки JwhOC не появились в течение 5 секунд");
-            }
+            console.log(`  ✅ [${attempt}/2] ${sel} (${els.length} шт)`);
+            any = true;
+            clicked = true;
+            await wait(400);
+            break;
           } else {
-            console.log("Кнопка отправки не найдена после снимка");
+            console.log(`  ❌ [${attempt}/2] ${sel}`);
           }
-        } else {
-          console.log("Кнопка снимка не найдена после ожидания");
+        } catch {
+          console.log(`  ⚠️ [${attempt}/2] ошибка ${sel}`);
         }
-      } catch {
-        console.log("Кнопка снимка не появилась в течение 5 секунд после разблокировки");
+        await wait(200);
       }
-    } else {
-      console.log("Кнопка разблокировки не найдена, ждём...");
+    }
+    return any;
+  }
+
+  async function reload(page) {
+    console.log("\n🔃 Перезагрузка страницы...\n");
+    try {
+      await page.reload({ waitUntil: "networkidle2", timeout: 15000 });
+    } catch {
+      console.log("⚠️ Reload завис, пробуем navigate...");
+      await page.goto("https://web.snapchat.com", { waitUntil: "networkidle2", timeout: 15000 });
+    }
+    await wait(2000);
+  }
+
+  // ─── Если застряли: перебрать кнопки, если не помогло — reload ───────────
+  async function unstuck(page) {
+    const any = await tryAllButtons(page);
+    await wait(1500);
+    if (!any) {
+      await reload(page);
+      return false; // сигнал: нужен continue в главном цикле
+    }
+    return true;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  const browser = await puppeteer.launch({ headless: false, defaultViewport: null });
+  const page = await browser.newPage();
+  await page.goto("https://web.snapchat.com", { waitUntil: "networkidle2" });
+  console.log("Ждём логин...");
+  await page.waitForFunction(() =>
+    document.querySelector('.FBYjn.gK0xL.W5dIq') || document.querySelector('.OK7va'),
+    { timeout: 0 }
+  );
+  console.log("✅ Логин прошёл. Запускаем...\n");
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  while (true) {
+
+    // ── ШАГ 0: Разблокировка ────────────────────────────────────────────────
+    console.log("── ШАГ 0: Разблокировка");
+    {
+      // Ждём до 30 секунд — кнопка появляется не сразу
+      const el = await waitFor(page, ".FBYjn.gK0xL.W5dIq", 30000);
+      if (!el) {
+        console.log("⏳ Разблокировка не найдена за 30 сек, перезагружаем...");
+        await reload(page);
+        continue;
+      }
+      await el.click();
+      await wait(800);
+      console.log("✅ ШАГ 0 выполнен");
     }
 
-    await new Promise(r => setTimeout(r, 5000)); // проверяем каждые 5 секунд
+    // ── ШАГ 1: Снимок ───────────────────────────────────────────────────────
+    console.log("── ШАГ 1: Снимок");
+    {
+      const el = await waitFor(page, ".fE2D5", 8000);
+      if (!el) {
+        console.log("❌ Кнопка снимка не появилась");
+        await unstuck(page);
+        continue;
+      }
+      let gone = false;
+      for (let i = 0; i < 4 && !gone; i++) {
+        const btn = await page.$(".fE2D5");
+        if (btn) { await btn.click(); await wait(600); }
+        gone = await waitGone(page, ".fE2D5", 3000);
+        if (!gone) console.log(`⚠️ Снимок не исчез, попытка ${i+1}`);
+      }
+      if (!gone) {
+        console.log("❌ Снимок не исчез за 4 попытки");
+        await unstuck(page);
+        continue;
+      }
+      console.log("✅ ШАГ 1 выполнен");
+    }
+
+    // ── ШАГ 2: Кнопка отправки ──────────────────────────────────────────────
+    console.log("── ШАГ 2: Кнопка отправки");
+    {
+      const el = await waitFor(page, ".YatIx.fGS78.eKaL7.Bnaur", 8000);
+      if (!el) {
+        console.log("❌ Кнопка отправки не появилась");
+        await unstuck(page);
+        continue;
+      }
+      await el.click();
+      await wait(800);
+      console.log("✅ ШАГ 2 выполнен");
+    }
+
+    // ── ШАГ 3: Огонёк 🔥 (не критично) ─────────────────────────────────────
+    console.log("── ШАГ 3: Огонёк 🔥");
+    {
+      const container = await waitFor(page, "div.THeKv", 4000);
+      if (container) {
+        const buttons = await page.$$("div.THeKv button.c47Sk");
+        let fireClicked = false;
+        for (const btn of buttons) {
+          const text = await page.evaluate(el => el.textContent, btn);
+          if (text.includes("🔥")) {
+            await btn.click();
+            await wait(500);
+            fireClicked = true;
+            console.log("✅ ШАГ 3 выполнен");
+            break;
+          }
+        }
+        if (!fireClicked) console.log("⚠️ 🔥 не найден, пропускаем");
+      } else {
+        console.log("⚠️ THeKv не найден, пропускаем");
+      }
+    }
+
+    // ── ШАГ 4: Блоки hsqnc ──────────────────────────────────────────────────
+    console.log("── ШАГ 4: Блоки hsqnc");
+    {
+      const el = await waitFor(page, ".hsqnc", 5000);
+      if (el) {
+        await clickAll(page, ".hsqnc", "hsqnc");
+
+        const finalEl = await waitFor(page, ".TYX6O.eKaL7.Bnaur", 5000);
+        if (finalEl) {
+          await finalEl.click();
+          await wait(600);
+          console.log("✅ ШАГ 4 + финальная посылка выполнены → новый цикл\n");
+          continue; // ← УСПЕШНЫЙ ПУТЬ, возврат к шагу 0
+        }
+        console.log("⚠️ Финальная кнопка не найдена после hsqnc");
+      } else {
+        console.log("⚠️ hsqnc не найдены, идём к шагу 5");
+      }
+    }
+
+    // ── ШАГ 5: Y7u8A ────────────────────────────────────────────────────────
+    console.log("── ШАГ 5: Y7u8A");
+    {
+      const el = await waitFor(page, ".Y7u8A", 5000);
+      if (!el) {
+        console.log("❌ Y7u8A не найден");
+        await unstuck(page);
+        continue;
+      }
+      await el.click();
+      await wait(800);
+      console.log("✅ ШАГ 5 выполнен");
+    }
+
+    // ── ШАГ 6: Блоки JwhOC ──────────────────────────────────────────────────
+    console.log("── ШАГ 6: Блоки JwhOC");
+    {
+      const el = await waitFor(page, ".JwhOC", 8000);
+      if (!el) {
+        console.log("❌ JwhOC не появились");
+        await unstuck(page);
+        continue;
+      }
+      await clickAll(page, ".JwhOC", "JwhOC");
+      console.log("✅ ШАГ 6 выполнен");
+    }
+
+    // ── ШАГ 7: div.s53_U ────────────────────────────────────────────────────
+    console.log("── ШАГ 7: div.s53_U");
+    {
+      const el = await waitFor(page, "div.s53_U", 8000);
+      if (!el) {
+        console.log("❌ div.s53_U не появился");
+        await unstuck(page);
+        continue;
+      }
+      await el.click();
+      await wait(800);
+      console.log("✅ ШАГ 7 выполнен");
+    }
+
+    // ── ШАГ 8: AJ_5h (выкл камеры) ──────────────────────────────────────────
+    console.log("── ШАГ 8: AJ_5h");
+    {
+      const el = await waitFor(page, "button.AJ_5h", 8000);
+      if (!el) {
+        console.log("❌ AJ_5h не появился");
+        await unstuck(page);
+        continue;
+      }
+      await el.click();
+      await wait(800);
+      console.log("✅ ШАГ 8 выполнен");
+    }
+
+    // ── ШАГ 9: Ждём снимок для нового цикла ─────────────────────────────────
+    console.log("── ШАГ 9: Ждём новый снимок");
+    {
+      const el = await waitFor(page, ".fE2D5", 8000);
+      if (el) {
+        console.log("✅ Готов к новому снимку! Цикл продолжается...\n");
+      } else {
+        console.log("⚠️ Снимок не появился, возвращаемся к шагу 0");
+      }
+      // В любом случае возвращаемся к шагу 0
+    }
   }
 
 })();
